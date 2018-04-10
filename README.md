@@ -127,6 +127,7 @@ truck: 0.995232
 bicycle: 0.999972
 save plot results to predictions.jpg
 ```
+![predictions](data/predictions.jpg)
 
 ### Train on COCO
 comming soon ...
