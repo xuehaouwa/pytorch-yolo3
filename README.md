@@ -1,5 +1,5 @@
 ### pytorch-yolo3
-Convert https://pjreddie.com/darknet/yolo/ into pytorch.
+Convert https://pjreddie.com/darknet/yolo/ into pytorch. Currently this repository works on python2 + pytorch 0.3.
 
 ### Todos
 - [x] make detect.py works
