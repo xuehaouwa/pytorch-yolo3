@@ -6,7 +6,7 @@ import torch.nn.functional as F
 from torch.autograd import Variable
 from utils import *
 
-def build_targets(pred_boxes, target, anchors, num_anchors, num_classes, nH, nW, noobject_scale, object_scale, sil_thresh, seen):
+def build_targets(pred_boxes, target, anchors, anchor_mask, num_anchors, num_classes, nH, nW, noobject_scale, object_scale, sil_thresh, seen):
     nB = target.size(0)
     nA = num_anchors
     nC = num_classes
@@ -26,7 +26,7 @@ def build_targets(pred_boxes, target, anchors, num_anchors, num_classes, nH, nW,
     for b in xrange(nB):
         cur_pred_boxes = pred_boxes[b*nAnchors:(b+1)*nAnchors].t()
         cur_ious = torch.zeros(nAnchors)
-        for t in xrange(50):
+        for t in xrange(TARGET_MAX_BOXES):
             if target[b][t*5+1] == 0:
                 break
             gx = target[b][t*5+1]*nW
@@ -50,7 +50,7 @@ def build_targets(pred_boxes, target, anchors, num_anchors, num_classes, nH, nW,
     nGT = 0
     nCorrect = 0
     for b in xrange(nB):
-        for t in xrange(50):
+        for t in xrange(TARGET_MAX_BOXES):
             if target[b][t*5+1] == 0:
                 break
             nGT = nGT + 1
@@ -81,21 +81,22 @@ def build_targets(pred_boxes, target, anchors, num_anchors, num_classes, nH, nW,
                     best_n = n
                     min_dist = dist
 
-            gt_box = [gx, gy, gw, gh]
-            pred_box = pred_boxes[b*nAnchors+best_n*nPixels+gj*nW+gi]
-
-            coord_mask[b][best_n][gj][gi] = 1
-            cls_mask[b][best_n][gj][gi] = 1
-            conf_mask[b][best_n][gj][gi] = object_scale
-            tx[b][best_n][gj][gi] = target[b][t*5+1] * nW - gi
-            ty[b][best_n][gj][gi] = target[b][t*5+2] * nH - gj
-            tw[b][best_n][gj][gi] = math.log(gw/anchors[anchor_step*best_n])
-            th[b][best_n][gj][gi] = math.log(gh/anchors[anchor_step*best_n+1])
-            iou = bbox_iou(gt_box, pred_box, x1y1x2y2=False) # best_iou
-            tconf[b][best_n][gj][gi] = iou
-            tcls[b][best_n][gj][gi] = target[b][t*5]
-            if iou > 0.5:
-                nCorrect = nCorrect + 1
+            if best_n in anchor_mask:
+                gt_box = [gx, gy, gw, gh]
+                pred_box = pred_boxes[b*nAnchors+best_n*nPixels+gj*nW+gi]
+    
+                coord_mask[b][best_n][gj][gi] = 1
+                cls_mask[b][best_n][gj][gi] = 1
+                conf_mask[b][best_n][gj][gi] = object_scale
+                tx[b][best_n][gj][gi] = target[b][t*5+1] * nW - gi
+                ty[b][best_n][gj][gi] = target[b][t*5+2] * nH - gj
+                tw[b][best_n][gj][gi] = math.log(gw/anchors[anchor_step*best_n])
+                th[b][best_n][gj][gi] = math.log(gh/anchors[anchor_step*best_n+1])
+                iou = bbox_iou(gt_box, pred_box, x1y1x2y2=False) # best_iou
+                tconf[b][best_n][gj][gi] = iou
+                tcls[b][best_n][gj][gi] = target[b][t*5]
+                if iou > 0.5:
+                    nCorrect = nCorrect + 1
 
     return nGT, nCorrect, coord_mask, conf_mask, cls_mask, tx, ty, tw, th, tconf, tcls
 
@@ -107,13 +108,16 @@ class YoloLayer(nn.Module):
         self.anchors = anchors
         self.num_anchors = num_anchors
         self.anchor_step = len(anchors)/num_anchors
+        assert(self.anchor_step == 2)
         self.coord_scale = 1
         self.noobject_scale = 1
         self.object_scale = 5
         self.class_scale = 1
         self.thresh = 0.6
         self.stride = 32
-        self.seen = 0
+        self.seen = [0]
+            
+        self.anchors = [anchor/self.stride for anchor in self.anchors]
 
     def forward(self, output, target=None):
         if self.training:
@@ -149,8 +153,8 @@ class YoloLayer(nn.Module):
             pred_boxes = convert2cpu(pred_boxes.transpose(0,1).contiguous().view(-1,4))
             t2 = time.time()
     
-            nGT, nCorrect, coord_mask, conf_mask, cls_mask, tx, ty, tw, th, tconf,tcls = build_targets(pred_boxes, target.data, self.anchors, nA, nC, \
-                                                                   nH, nW, self.noobject_scale, self.object_scale, self.thresh, self.seen)
+            nGT, nCorrect, coord_mask, conf_mask, cls_mask, tx, ty, tw, th, tconf,tcls = build_targets(pred_boxes, target.data, self.anchors, self.anchor_mask, nA, nC, \
+                                                                   nH, nW, self.noobject_scale, self.object_scale, self.thresh, self.seen[0])
             cls_mask = (cls_mask == 1)
             nProposals = int((conf > 0.25).sum().data[0])
     
@@ -183,7 +187,8 @@ class YoloLayer(nn.Module):
                 print('     build targets : %f' % (t3 - t2))
                 print('       create loss : %f' % (t4 - t3))
                 print('             total : %f' % (t4 - t0))
-            print('%d: nGT %d, recall %d, proposals %d, loss: x %f, y %f, w %f, h %f, conf %f, cls %f, total %f' % (self.seen, nGT, nCorrect, nProposals, loss_x.data[0], loss_y.data[0], loss_w.data[0], loss_h.data[0], loss_conf.data[0], loss_cls.data[0], loss.data[0]))
+            print('%d: nGT %d, recall %d, proposals %d, loss: x %f, y %f, w %f, h %f, conf %f, cls %f, total %f' % (self.seen[0], nGT, nCorrect, nProposals, loss_x.data[0], loss_y.data[0], loss_w.data[0], loss_h.data[0], loss_conf.data[0], loss_cls.data[0], loss.data[0]))
+            self.seen[0] += nB
             return loss
         else:
             masked_anchors = []

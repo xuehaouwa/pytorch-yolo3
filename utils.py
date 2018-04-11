@@ -11,6 +11,8 @@ import itertools
 import struct # get_image_size
 import imghdr # get_image_size
 
+TARGET_MAX_BOXES = 100
+
 def sigmoid(x):
     return 1.0/(math.exp(-x)+1.)
 

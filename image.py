@@ -4,6 +4,7 @@ import random
 import os
 from PIL import Image
 import numpy as np
+from utils import TARGET_MAX_BOXES
 
 
 def scale_image_channel(im, c, v):
@@ -78,7 +79,7 @@ def data_augmentation(img, shape, jitter, hue, saturation, exposure):
     return img, flip, dx,dy,sx,sy 
 
 def fill_truth_detection(labpath, w, h, flip, dx, dy, sx, sy):
-    max_boxes = 50
+    max_boxes = TARGET_MAX_BOXES
     label = np.zeros((max_boxes,5))
     if os.path.getsize(labpath):
         bs = np.loadtxt(labpath)
@@ -109,7 +110,7 @@ def fill_truth_detection(labpath, w, h, flip, dx, dy, sx, sy):
                 continue
             label[cc] = bs[i]
             cc += 1
-            if cc >= 50:
+            if cc >= TARGET_MAX_BOXES:
                 break
 
     label = np.reshape(label, (-1))

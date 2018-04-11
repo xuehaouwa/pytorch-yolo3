@@ -345,7 +345,7 @@ class Darknet(nn.Module):
             elif block['type'] == 'region':
                 pass
             elif block['type'] == 'yolo':
-                pass
+                self.models[ind].seen[0] = self.seen  # very important
             elif block['type'] == 'avgpool':
                 pass
             elif block['type'] == 'softmax':
