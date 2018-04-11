@@ -20,7 +20,6 @@ import math
 import os
 from utils import *
 from cfg import parse_cfg
-from region_loss import RegionLoss
 from darknet import Darknet
 from models.tiny_yolo import TinyYoloNet
 
@@ -72,12 +71,10 @@ if use_cuda:
     torch.cuda.manual_seed(seed)
 
 model       = Darknet(cfgfile)
-region_loss = model.loss
 
 model.load_weights(weightfile)
 model.print_network()
 
-region_loss.seen  = model.seen
 processed_batches = model.seen/batch_size
 
 init_width        = model.width
@@ -162,15 +159,12 @@ def train(epoch):
         t4 = time.time()
         optimizer.zero_grad()
         t5 = time.time()
-        output = model(data)
+        loss = model(data)
         t6 = time.time()
-        region_loss.seen = region_loss.seen + data.data.size(0)
-        loss = region_loss(output, target)
-        t7 = time.time()
         loss.backward()
-        t8 = time.time()
+        t7 = time.time()
         optimizer.step()
-        t9 = time.time()
+        t8 = time.time()
         if False and batch_idx > 1:
             avg_time[0] = avg_time[0] + (t2-t1)
             avg_time[1] = avg_time[1] + (t3-t2)
@@ -179,18 +173,16 @@ def train(epoch):
             avg_time[4] = avg_time[4] + (t6-t5)
             avg_time[5] = avg_time[5] + (t7-t6)
             avg_time[6] = avg_time[6] + (t8-t7)
-            avg_time[7] = avg_time[7] + (t9-t8)
-            avg_time[8] = avg_time[8] + (t9-t1)
+            avg_time[7] = avg_time[7] + (t8-t1)
             print('-------------------------------')
             print('       load data : %f' % (avg_time[0]/(batch_idx)))
             print('     cpu to cuda : %f' % (avg_time[1]/(batch_idx)))
             print('cuda to variable : %f' % (avg_time[2]/(batch_idx)))
             print('       zero_grad : %f' % (avg_time[3]/(batch_idx)))
-            print(' forward feature : %f' % (avg_time[4]/(batch_idx)))
-            print('    forward loss : %f' % (avg_time[5]/(batch_idx)))
-            print('        backward : %f' % (avg_time[6]/(batch_idx)))
-            print('            step : %f' % (avg_time[7]/(batch_idx)))
-            print('           total : %f' % (avg_time[8]/(batch_idx)))
+            print('         forward : %f' % (avg_time[4]/(batch_idx)))
+            print('        backward : %f' % (avg_time[5]/(batch_idx)))
+            print('            step : %f' % (avg_time[6]/(batch_idx)))
+            print('           total : %f' % (avg_time[7]/(batch_idx)))
         t1 = time.time()
     print('')
     t1 = time.time()
@@ -222,8 +214,7 @@ def test(epoch):
         if use_cuda:
             data = data.cuda()
         data = Variable(data, volatile=True)
-        output = model(data).data
-        all_boxes = get_region_boxes(output, conf_thresh, num_classes, anchors, num_anchors)
+        all_boxes = model(data)
         for i in range(output.size(0)):
             boxes = all_boxes[i]
             boxes = nms(boxes, nms_thresh)

@@ -80,25 +80,18 @@ class Darknet(nn.Module):
         super(Darknet, self).__init__()
         self.blocks = parse_cfg(cfgfile)
         self.models = self.create_network(self.blocks) # merge conv, bn,leaky
-        self.loss = self.models[len(self.models)-1]
 
         self.width = int(self.blocks[0]['width'])
         self.height = int(self.blocks[0]['height'])
 
-        if self.blocks[(len(self.blocks)-1)]['type'] == 'region':
-            self.anchors = self.loss.anchors
-            self.num_anchors = self.loss.num_anchors
-            self.anchor_step = self.loss.anchor_step
-            self.num_classes = self.loss.num_classes
-
-        self.header = torch.IntTensor([0,0,0,0])
+        self.header = torch.IntTensor([0,0,0,0,0]) # 4 ints -> 5 ints
         self.seen = 0
 
-    def forward(self, x):
+    def forward(self, x, target=None):
         ind = -2
-        self.loss = None
         outputs = dict()
         out_boxes = []
+        out_loss = None
         for block in self.blocks:
             ind = ind + 1
             #if ind > 0:
@@ -132,25 +125,24 @@ class Darknet(nn.Module):
                 elif activation == 'relu':
                     x = F.relu(x, inplace=True)
                 outputs[ind] = x
-            elif block['type'] == 'region':
-                continue
-                if self.loss:
-                    self.loss = self.loss + self.models[ind](x)
-                else:
-                    self.loss = self.models[ind](x)
-                outputs[ind] = None
-            elif block['type'] == 'yolo':
+            elif block['type'] in ['region', 'yolo']:
                 if self.training:
-                    pass
+                    loss = self.models[ind](x, target)
+                    if isinstance(loss, Variable):
+                        out_loss += loss
+                    else:
+                        out_loss = loss
+                    outputs[ind] = loss
                 else:
                     boxes = self.models[ind](x)
                     out_boxes.append(boxes)
+                    outputs[ind] = boxes
             elif block['type'] == 'cost':
                 continue
             else:
                 print('unknown type %s' % (block['type']))
         if self.training:
-            return loss
+            return out_loss
         else:
             return out_boxes
 
